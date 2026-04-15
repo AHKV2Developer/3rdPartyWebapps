@@ -10,6 +10,7 @@
         .container { background: white; padding: 2rem; border-radius: 1.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
         #userDisplay { font-size: 0.8rem; color: #64748b; margin-bottom: 1rem; }
         #status { margin: 1rem 0; font-weight: 500; color: #1e293b; min-height: 1.5rem; }
+        #transcribedText { font-size: 0.9rem; color: #475569; margin: 10px 0; font-style: italic; min-height: 1.2rem; }
         button { border: none; border-radius: 1rem; padding: 1rem 2rem; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s; width: 100%; margin-bottom: 1rem; }
         button:active { transform: scale(0.98); }
         .btn-voice { background: var(--primary); color: white; }
@@ -24,7 +25,9 @@
 <div class="container">
     <div id="userDisplay">Logged as: <span id="userNameText">...</span></div>
     <div id="status">Ready</div>
-    <div id="transcribedText" style="font-size: 0.9rem; color: #475569; margin: 10px 0; font-style: italic;"></div>
+    
+    <div id="transcribedText"></div>
+    
     <button id="voiceBtn" class="btn-voice">Voice Only</button>
     <button id="gpsBtn" class="btn-gps">Voice + GPS</button>
     
@@ -32,7 +35,7 @@
 </div>
 
 <script>
-    // --- USER IDENTITY LOGIC ---
+    // 1. Identity Logic
     let userName = localStorage.getItem('loggerUserName');
     
     function checkUser() {
@@ -54,9 +57,10 @@
 
     checkUser();
 
-    // --- CORE LOGIC ---
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyb1KVmfQYtOQgsqGiyZKeZrzdZpi9wFKnmTGq6GJd3P0loeHziZJl29ubf8vfYYrA/exec"; // Update this!
+    // 2. Core Logic
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyb1KVmfQYtOQgsqGiyZKeZrzdZpi9wFKnmTGq6GJd3P0loeHziZJl29ubf8vfYYrA/exec"; // PASTE YOUR URL HERE!
     const status = document.getElementById('status');
+    const display = document.getElementById('transcribedText');
     const voiceBtn = document.getElementById('voiceBtn');
     const gpsBtn = document.getElementById('gpsBtn');
 
@@ -71,6 +75,7 @@
     gpsBtn.onclick = () => { useGPS = true; startRecording(); };
 
     function startRecording() {
+        display.innerText = ""; // Clear old text when starting
         recognition.start();
         status.innerText = "Listening...";
         voiceBtn.classList.add('recording');
@@ -79,6 +84,10 @@
 
     recognition.onresult = (event) => {
         const text = event.results[0][0].transcript;
+        
+        // UPDATE DISPLAY: Show the user what they said
+        display.innerText = "You said: " + text;
+        
         status.innerText = "Processing...";
         
         if (useGPS) {
@@ -115,7 +124,10 @@
         })
         .then(() => {
             status.innerText = "Saved Successfully!";
-            setTimeout(() => status.innerText = "Ready", 3000);
+            setTimeout(() => {
+                status.innerText = "Ready";
+                display.innerText = ""; // Optional: Clear text after 5 seconds
+            }, 5000);
         })
         .catch(err => {
             status.innerText = "Error Saving";
