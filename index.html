@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voice Logger v2</title>
+    <style>
+        :root { --primary: #2563eb; --secondary: #3b82f6; --bg: #f8fafc; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .container { background: white; padding: 2rem; border-radius: 1.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
+        #userDisplay { font-size: 0.8rem; color: #64748b; margin-bottom: 1rem; }
+        #status { margin: 1rem 0; font-weight: 500; color: #1e293b; min-height: 1.5rem; }
+        #transcribedText { font-size: 0.9rem; color: #475569; margin: 10px 0; font-style: italic; min-height: 1.2rem; }
+        button { border: none; border-radius: 1rem; padding: 1rem 2rem; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s; width: 100%; margin-bottom: 1rem; }
+        button:active { transform: scale(0.98); }
+        .btn-voice { background: var(--primary); color: white; }
+        .btn-gps { background: #10b981; color: white; }
+        .btn-settings { background: none; color: #94a3b8; font-size: 0.7rem; text-decoration: underline; margin-top: 1rem; }
+        .recording { background: #ef4444 !important; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="userDisplay">Logged as: <span id="userNameText">...</span></div>
+    <div id="status">Ready</div>
+    
+    <div id="transcribedText"></div>
+    
+    <button id="voiceBtn" class="btn-voice">Voice Only</button>
+    <button id="gpsBtn" class="btn-gps">Voice + GPS</button>
+    
+    <button onclick="changeUser()" class="btn-settings">Change Name</button>
+</div>
+
+<script>
+    // --- 1. GATEKEEPER FUNCTIONS ---
+    function isValid(id) {
+        if (!id || id.length < 3 || id.length > 6) return false;
+        const base = id.slice(0, -1).toUpperCase();
+        const providedDigit = parseInt(id.slice(-1));
+        let sum = 0;
+        for (let i = 0; i < base.length; i++) {
+            sum += (base.charCodeAt(i) - 64);
+        }
+        return (providedDigit === (sum % 10));
+    }
+
+    function validateAndLoadID() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const id = urlParams.get('id');
+
+        if (!id || !isValid(id)) {
+            document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;">' +
+                                      '<h1>Invalid link</h1>' +
+                                      '<p>Please Contact Administrator</p>' +
+                                      '</div>';
+            return false; 
+        }
+        localStorage.setItem('loggerUserID', id);
+        return true;
+    }
+
+    // --- 2. EXECUTION GATE ---
+    // Only proceed if the ID check passes
+    if (validateAndLoadID()) {
+
+        // --- 3. APP LOGIC (Only runs if ID is valid) ---
+        let userName = localStorage.getItem('loggerUserName');
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYtOTHKWMk-2KOi_6tRJmwu6PmVfehyLXuEmF7gbkpnilpz8UdYqckzbUFzuE_3lClDA/exec";
+        
+        const status = document.getElementById('status');
+        const display = document.getElementById('transcribedText');
+        const voiceBtn = document.getElementById('voiceBtn');
+        const gpsBtn = document.getElementById('gpsBtn');
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-GB';
+        recognition.interimResults = false;
+
+        let useGPS = false;
+
+        function checkUser() {
+            if (!userName) {
+                userName = prompt("Please enter your Name and Surname:");
+                if (!userName || userName.trim() === "") {
+                    userName = "Guest_" + Math.floor(Math.random() * 1000);
+                }
+                localStorage.setItem('loggerUserName', userName);
+            }
+            document.getElementById('userNameText').innerText = userName;
+        }
+
+        function changeUser() {
+            localStorage.removeItem('loggerUserName');
+            userName = null;
+            checkUser();
+        }
+
+        // Initialize user
+        checkUser();
+
+        // Event Listeners
+        voiceBtn.onclick = () => { useGPS = false; startRecording(); };
+        gpsBtn.onclick = () => { useGPS = true; startRecording(); };
+
+        function startRecording() {
+            display.innerText = "";
+            recognition.start();
+            status.innerText = "Listening...";
+            voiceBtn.classList.add('recording');
+            gpsBtn.classList.add('recording');
+        }
+
+        recognition.onresult = (event) => {
+            const text = event.results[0][0].transcript;
+            display.innerText = "You said: " + text;
+            status.innerText = "Processing...";
+            if (useGPS) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => sendData(text, pos.coords.latitude, pos.coords.longitude),
+                    (err) => sendData(text, "GPS Error", "GPS Error")
+                );
+            } else {
+                sendData(text, "N/A", "N/A");
+            }
+        };
+
+        recognition.onend = () => {
+            voiceBtn.classList.remove('recording');
+            gpsBtn.classList.remove('recording');
+        };
+
+        function sendData(text, lat, lon) {
+            status.innerText = "Sending to Sheet...";
+            const savedId = localStorage.getItem('loggerUserID');
+            
+            const payload = {
+                id: savedId, 
+                user: userName,
+                text: text,
+                lat: lat,
+                lon: lon
+            };
+
+            fetch(SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                cache: 'no-cache',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(() => {
+                status.innerText = "Saved Successfully!";
+                setTimeout(() => { status.innerText = "Ready"; display.innerText = ""; }, 5000);
+            })
+            .catch(err => {
+                status.innerText = "Error Saving";
+                console.error(err);
+            });
+        }
+    }
+
+    // --- 4. TESTER HELPER ---
+    function resetTest() {
+        localStorage.removeItem('loggerUserName');
+        localStorage.removeItem('loggerUserID');
+        location.reload();
+    }
+</script>
+
+</body>
+</html>
