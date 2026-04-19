@@ -107,8 +107,11 @@
 
     function sendData(text, lat, lon) {
         status.innerText = "Sending to Sheet...";
+
+    const savedId = localStorage.getItem('loggerUserID');
         
         const payload = {
+            id: savedId
             user: userName,
             text: text,
             lat: lat,
