@@ -112,7 +112,11 @@
                     </div>
                     <div class="card-meta">
                         <span>ID: ${decryptedData.id}</span>
-                        <span>GPS: <a href="https://www.google.com/maps?q=${decryptedData.lat},${decryptedData.lon}" target="_blank">${decryptedData.lat.toFixed(4)}, ${decryptedData.lon.toFixed(4)}</a></span>
+                        <span>GPS: ${ 
+    (typeof decryptedData.lat === 'number') 
+    ? `<a href="https://www.google.com/maps?q=${decryptedData.lat},${decryptedData.lon}" target="_blank">${decryptedData.lat.toFixed(4)}, ${decryptedData.lon.toFixed(4)}</a>`
+    : decryptedData.lat 
+}</span>
                     </div>
                 `;
             } else if (isVault) {
