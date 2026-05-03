@@ -1,75 +1,187 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Vault Logger</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Secure Voice Logger v3</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; max-width: 400px; margin: auto; }
-        .box { border: 1px solid #ccc; padding: 15px; border-radius: 8px; }
-        input, button, textarea { width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; }
-        button { background: #007bff; color: white; border: none; cursor: pointer; }
+        :root { --primary: #2563eb; --secondary: #3b82f6; --bg: #f8fafc; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .container { background: white; padding: 1.5rem; border-radius: 1.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
+        #userDisplay { font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem; }
+        #status { margin: 0.5rem 0; font-weight: 500; color: #1e293b; min-height: 1.2rem; }
+        #transcribedText { font-size: 0.9rem; color: #475569; margin: 10px 0; font-style: italic; min-height: 1.2rem; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        
+        /* New Passphrase Style */
+        .pass-container { margin-bottom: 1rem; }
+        input[type="password"] { width: 100%; padding: 0.8rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; box-sizing: border-box; font-size: 1rem; text-align: center; }
+        
+        button { border: none; border-radius: 1rem; padding: 1rem 2rem; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s; width: 100%; margin-bottom: 0.8rem; }
+        button:active { transform: scale(0.98); }
+        .btn-voice { background: var(--primary); color: white; }
+        .btn-gps { background: #10b981; color: white; }
+        .btn-settings { background: none; color: #94a3b8; font-size: 0.7rem; text-decoration: underline; margin-top: 0.5rem; }
+        .recording { background: #ef4444 !important; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
-<div class="box">
-    <h3>Vault Logger</h3>
+
+<div class="container">
+    <div id="userDisplay">Logged as: <span id="userNameText">...</span></div>
+    
     <form id="vaultForm">
-        <input type="text" id="deployUrl" placeholder="Deployment URL (or from URL/Storage)">
-        <input type="password" id="passphrase" name="password" autocomplete="current-password" placeholder="Passphrase (min 10 chars)" required minlength="10">
-        <input type="text" id="userId" placeholder="Your ID (e.g. USER1)">
-        <input type="text" id="userName" placeholder="Your Name">
-        <textarea id="message" placeholder="Message to encrypt..."></textarea>
-        <button type="button" onclick="sendVault()">Lock and Send</button>
+        <div class="pass-container">
+            <input type="password" id="passphrase" name="password" autocomplete="current-password" placeholder="Vault Passphrase" required minlength="10">
+        </div>
+        
+        <div id="status">Ready</div>
+        <div id="transcribedText"></div>
+        
+        <button type="button" id="voiceBtn" class="btn-voice">Voice Only</button>
+        <button type="button" id="gpsBtn" class="btn-gps">Voice + GPS</button>
     </form>
-    <div id="status"></div>
+    
+    <button onclick="changeUser()" class="btn-settings">Change Name</button>
 </div>
 
 <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const deployParam = urlParams.get('deploy');
-    if (deployParam) {
-        localStorage.setItem('saved_deploy_url', deployParam);
-        document.getElementById('deployUrl').value = deployParam;
-    } else {
-        document.getElementById('deployUrl').value = localStorage.getItem('saved_deploy_url') || "";
+    // --- 1. GATEKEEPER & DEPLOYMENT CONFIG ---
+    function isValid(id) {
+        if (!id || id.length < 3 || id.length > 6) return false;
+        const base = id.slice(0, -1).toUpperCase();
+        const providedDigit = parseInt(id.slice(-1));
+        let sum = 0;
+        for (let i = 0; i < base.length; i++) { sum += (base.charCodeAt(i) - 64); }
+        return (providedDigit === (sum % 10));
     }
 
-    async function sendVault() {
-        const pass = document.getElementById('passphrase').value;
-        const deploy = document.getElementById('deployUrl').value;
-        if (!pass || !deploy) return alert("Passphrase and Deployment URL required.");
-        
+    const urlParams = new URLSearchParams(window.location.search);
+    const logId = urlParams.get('id');
+    const deployUrl = urlParams.get('deploy') || localStorage.getItem('saved_deploy_url');
+
+    // Logic Gate: Must have valid ID and Deployment URL
+    if (!isValid(logId) || !deployUrl) {
+        document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;">' +
+                                  '<h1>Access Denied</h1>' +
+                                  '<p>Invalid ID or Missing Deployment Parameter.</p>' +
+                                  '</div>';
+    } else {
+        // Save valid config
+        localStorage.setItem('loggerUserID', logId);
+        localStorage.setItem('saved_deploy_url', deployUrl);
+
+        // --- 2. INITIALIZATION ---
+        let userName = localStorage.getItem('loggerUserName');
         const status = document.getElementById('status');
-        status.innerText = "Encrypting...";
+        const display = document.getElementById('transcribedText');
+        const voiceBtn = document.getElementById('voiceBtn');
+        const gpsBtn = document.getElementById('gpsBtn');
 
-        // --- Crypto Logic ---
-        const enc = new TextEncoder();
-        const keyMat = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
-        const key = await crypto.subtle.deriveKey(
-            { name: "PBKDF2", salt: enc.encode("static-salt-2026"), iterations: 100000, hash: "SHA-256" },
-            keyMat, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
-        );
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-GB';
+        recognition.interimResults = false;
 
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const payload = JSON.stringify({
-            id: document.getElementById('userId').value,
-            user: document.getElementById('userName').value,
-            text: document.getElementById('message').value,
-            lat: "SECURE", lon: "SECURE" // GPS logic would go here
-        });
+        let useGPS = false;
 
-        const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, enc.encode(payload));
-        const combined = new Uint8Array(iv.length + encrypted.byteLength);
-        combined.set(iv); combined.set(new Uint8Array(encrypted), iv.length);
-        const vaultString = "VAULT[" + btoa(String.fromCharCode(...combined)) + "]";
+        function checkUser() {
+            if (!userName) {
+                userName = prompt("Enter your Name:");
+                if (!userName || userName.trim() === "") userName = "User_" + logId;
+                localStorage.setItem('loggerUserName', userName);
+            }
+            document.getElementById('userNameText').innerText = userName;
+        }
 
-        fetch(deploy, {
-            method: 'POST', mode: 'no-cors',
-            body: JSON.stringify({ id: "SECURE", user: "SECURE", text: vaultString, lat: "SECURE", lon: "SECURE" })
-        }).then(() => {
-            status.innerText = "Sent Successfully!";
-            document.getElementById('message').value = "";
-        });
+        function changeUser() {
+            localStorage.removeItem('loggerUserName');
+            userName = null;
+            checkUser();
+        }
+
+        checkUser();
+
+        // --- 3. VOICE & GPS HANDLING ---
+        voiceBtn.onclick = () => { useGPS = false; startRecording(); };
+        gpsBtn.onclick = () => { useGPS = true; startRecording(); };
+
+        function startRecording() {
+            const pass = document.getElementById('passphrase').value;
+            if (pass.length < 10) return alert("Passphrase must be at least 10 characters.");
+            
+            display.innerText = "";
+            recognition.start();
+            status.innerText = "Listening...";
+            voiceBtn.classList.add('recording');
+            gpsBtn.classList.add('recording');
+        }
+
+        recognition.onresult = (event) => {
+            const text = event.results[0][0].transcript;
+            display.innerText = text;
+            status.innerText = "Encrypting...";
+            
+            if (useGPS) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => prepareVault(text, pos.coords.latitude, pos.coords.longitude),
+                    (err) => prepareVault(text, "GPS Error", "GPS Error")
+                );
+            } else {
+                prepareVault(text, "N/A", "N/A");
+            }
+        };
+
+        recognition.onend = () => {
+            voiceBtn.classList.remove('recording');
+            gpsBtn.classList.remove('recording');
+        };
+
+        // --- 4. ENCRYPTION & TRANSMISSION ---
+        async function prepareVault(text, lat, lon) {
+            const pass = document.getElementById('passphrase').value;
+            const currentDeploy = localStorage.getItem('saved_deploy_url');
+
+            try {
+                const enc = new TextEncoder();
+                const keyMat = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+                const key = await crypto.subtle.deriveKey(
+                    { name: "PBKDF2", salt: enc.encode("static-salt-2026"), iterations: 100000, hash: "SHA-256" },
+                    keyMat, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
+                );
+
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const payload = JSON.stringify({
+                    id: localStorage.getItem('loggerUserID'),
+                    user: userName,
+                    text: text,
+                    lat: lat,
+                    lon: lon
+                });
+
+                const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, enc.encode(payload));
+                const combined = new Uint8Array(iv.length + encrypted.byteLength);
+                combined.set(iv); 
+                combined.set(new Uint8Array(encrypted), iv.length);
+                
+                const vaultString = "VAULT[" + btoa(String.fromCharCode(...combined)) + "]";
+
+                // Post to Google Sheet
+                status.innerText = "Sending to Vault...";
+                fetch(currentDeploy, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: JSON.stringify({ id: "SECURE", user: "SECURE", text: vaultString, lat: "SECURE", lon: "SECURE" })
+                }).then(() => {
+                    status.innerText = "Saved Successfully!";
+                    setTimeout(() => { status.innerText = "Ready"; display.innerText = ""; }, 3000);
+                });
+
+            } catch (e) {
+                status.innerText = "Encryption Failed";
+                console.error(e);
+            }
+        }
     }
 </script>
 </body>
