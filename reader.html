@@ -11,40 +11,26 @@
         th { background: #eee; font-weight: bold; }
         td:hover { overflow: visible; white-space: normal; background: #ffffd0; position: relative; z-index: 10; }
         .controls { border: 1px solid #000; padding: 10px; display: inline-block; background: #fafafa; }
-        
-        /* Unified Button Styling */
-        .btn-stack { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
-        .ctrl-btn { 
-            font-family: "Courier New", Courier, monospace; 
-            font-size: 12px; 
-            background: none; 
-            border: 1px solid #000; 
-            cursor: pointer; 
-            padding: 4px;
-            width: 120px; /* Fixed width to ensure alignment */
-            text-align: center;
-        }
+        .btn-container { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; width: fit-content; }
+        .ctrl-btn { font-family: "Courier New", monospace; font-size: 12px; background: #fff; border: 1px solid #000; cursor: pointer; padding: 4px 8px; width: 130px; text-align: center; display: block; }
         .ctrl-btn:hover { background: #eee; }
-        
         .map-link { color: blue; text-decoration: underline; cursor: pointer; }
     </style>
 </head>
 <body>
 
 <div class="controls">
-    <form onsubmit="event.preventDefault(); fetchData();">
+    <form id="vaultForm" onsubmit="event.preventDefault(); fetchData();">
         <strong>Key:</strong> 
-        <input type="password" id="passphrase" autocomplete="current-password" oninput="renderTable()">
+        <input type="password" id="passphrase" name="password" autocomplete="current-password" oninput="renderTable()">
         <label style="font-size: 11px; margin-left:5px;">
             <input type="checkbox" onchange="document.getElementById('passphrase').type = this.checked ? 'text' : 'password'"> Show
         </label>
+        <div class="btn-container">
+            <button type="submit" class="ctrl-btn">🔄 Refresh</button>
+            <button type="button" class="ctrl-btn" onclick="copyToClipboard()">Copy Records</button>
+        </div>
     </form>
-    
-    <div class="btn-stack">
-        <button type="button" class="ctrl-btn" onclick="fetchData()">Refresh</button>
-        <button type="button" class="ctrl-btn" onclick="copyToClipboard()">Copy Records</button>
-    </div>
-    
     <div id="status" style="margin-top:8px; font-weight: bold;">Enter key to scan...</div>
 </div>
 
@@ -80,9 +66,15 @@
             const r = await fetch(deployUrl);
             rawData = await r.json();
             renderTable();
-        } catch(e) {
-            document.getElementById('status').innerText = "Fetch failed.";
-        }
+        } catch(e) { document.getElementById('status').innerText = "Fetch failed."; }
+    }
+
+    // High-speed Hash Generator
+    async function getThumbprint(pass) {
+        const msgUint8 = new TextEncoder().encode(pass + "salt2026");
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
     }
 
     async function decrypt(blob, pass) {
@@ -107,9 +99,16 @@
         tbody.innerHTML = "";
         if (pass.length < 10) return;
 
+        // Generate the thumbprint for the current input
+        const currentThumb = await getThumbprint(pass);
         let count = 0;
+
         for (let row of [...rawData].reverse()) {
-            if (row.text && row.text.startsWith("VAULT[")) {
+            // STEP 1: Fast Hash Check (Gatekeeper)
+            // We assume 'audit' is the column where the thumbprint is stored
+            if (row.audit === currentThumb && row.text.startsWith("VAULT[")) {
+                
+                // STEP 2: Only decrypt if the hash matched
                 const dec = await decrypt(row.text.substring(6, row.text.length-1), pass);
                 if (dec) {
                     try {
@@ -117,8 +116,6 @@
                         count++;
                         const tr = document.createElement('tr');
                         const dateStr = fmt.format(new Date(row.timestamp));
-                        
-                        // Restored "View on Map" text
                         const mapLink = (!isNaN(obj.lat) && obj.lat !== null) 
                             ? `<a class="map-link" href="https://www.google.com/maps?q=${obj.lat},${obj.lon}" target="_blank">View on Map</a>` 
                             : (obj.lat || "N/A");
@@ -134,29 +131,15 @@
 
     function copyToClipboard() {
         const table = document.getElementById('mainTable');
-        let tsv = [];
-        
-        // Headers
-        const headers = Array.from(table.querySelectorAll('th')).map(th => th.innerText);
-        tsv.push(headers.join('\t'));
-
-        // Decrypted Rows
+        let tsv = [Array.from(table.querySelectorAll('th')).map(th => th.innerText).join('\t')];
         const rows = Array.from(table.querySelectorAll('tbody tr'));
-        if (rows.length === 0) {
-            alert("No records to copy.");
-            return;
-        }
-
-        rows.forEach(row => {
-            const cells = Array.from(row.querySelectorAll('td')).map(td => td.innerText);
-            tsv.push(cells.join('\t'));
-        });
-
-        const fullTsv = tsv.join('\n');
-        navigator.clipboard.writeText(fullTsv).then(() => {
-            const oldStatus = document.getElementById('status').innerText;
-            document.getElementById('status').innerText = "Copied to Clipboard (TSV)";
-            setTimeout(() => { document.getElementById('status').innerText = oldStatus; }, 2000);
+        if (rows.length === 0) return;
+        rows.forEach(row => tsv.push(Array.from(row.querySelectorAll('td')).map(td => td.innerText).join('\t')));
+        navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+            const status = document.getElementById('status');
+            const old = status.innerText;
+            status.innerText = "COPIED TO CLIPBOARD (TSV)";
+            setTimeout(() => status.innerText = old, 2000);
         });
     }
 
