@@ -12,8 +12,6 @@
         td:hover { overflow: visible; white-space: normal; background: #ffffd0; position: relative; z-index: 10; }
         
         .controls { border: 1px solid #000; padding: 10px; display: inline-block; background: #fafafa; }
-        
-        /* Strict Alignment */
         .input-row { display: flex; align-items: flex-start; gap: 10px; }
         .label-group { display: flex; align-items: center; gap: 8px; height: 22px; }
         .button-stack { display: flex; flex-direction: column; gap: 2px; }
@@ -30,12 +28,12 @@
         .ctrl-btn { 
             font-family: "Courier New", Courier, monospace; 
             font-size: 12px; 
-            background: #fff; /* White background */
+            background: #fff; 
             border: 1px solid #000; 
             cursor: pointer; 
             padding: 0 8px;
             width: 130px; 
-            height: 22px; /* Matches Input Box */
+            height: 22px; 
             display: flex;
             align-items: center;
             justify-content: center;
@@ -43,15 +41,7 @@
             color: #000;
         }
         
-        /* Force no blue background on the refresh icon */
-        .ctrl-btn span { 
-            background: none !important; 
-            display: inline-block;
-            line-height: 1;
-        }
-        
         .ctrl-btn:hover { background: #eee; }
-        
         .map-link { color: blue; text-decoration: underline; cursor: pointer; }
     </style>
 </head>
@@ -62,7 +52,7 @@
         <div class="input-row">
             <div class="label-group">
                 <strong>Key:</strong> 
-                <input type="password" id="passphrase" name="password" autocomplete="current-password" oninput="renderTable()">
+                <input type="password" id="passphrase" name="password" autocomplete="current-password">
                 <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap;">
                     <input type="checkbox" onchange="document.getElementById('passphrase').type = this.checked ? 'text' : 'password'"> Show
                 </label>
@@ -75,7 +65,7 @@
         </div>
     </form>
     
-    <div id="status" style="margin-top:8px; font-weight: bold;">Enter key to scan...</div>
+    <div id="status" style="margin-top:8px; font-weight: bold;">Enter key and press Refresh...</div>
 </div>
 
 <table id="mainTable">
@@ -100,17 +90,6 @@
 
     if (deployUrl) {
         localStorage.setItem('saved_deploy_url', deployUrl);
-        fetchData();
-    }
-
-    async function fetchData() {
-        if (!deployUrl) return;
-        document.getElementById('status').innerText = "Fetching...";
-        try {
-            const r = await fetch(deployUrl);
-            rawData = await r.json();
-            renderTable();
-        } catch(e) { document.getElementById('status').innerText = "Fetch failed."; }
     }
 
     async function getThumbprint(pass) {
@@ -118,6 +97,26 @@
         const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
+    }
+
+    async function fetchData() {
+        const pass = document.getElementById('passphrase').value;
+        if (!deployUrl || pass.length < 10) {
+            document.getElementById('status').innerText = "Key too short (min 10).";
+            return;
+        }
+        
+        document.getElementById('status').innerText = "Scanning Vault...";
+        const thumb = await getThumbprint(pass);
+        
+        try {
+            // Updated to use the new ?read=true&audit= parameters
+            const r = await fetch(`${deployUrl}?read=true&audit=${thumb}`);
+            rawData = await r.json();
+            renderTable(pass);
+        } catch(e) { 
+            document.getElementById('status').innerText = "Fetch failed."; 
+        }
     }
 
     async function decrypt(blob, pass) {
@@ -136,17 +135,14 @@
         } catch(e) { return null; }
     }
 
-    async function renderTable() {
-        const pass = document.getElementById('passphrase').value;
+    async function renderTable(pass) {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = "";
-        if (pass.length < 10) return;
-
-        const currentThumb = await getThumbprint(pass);
         let count = 0;
 
+        // Script already filtered by hash, so we just decrypt what we received
         for (let row of [...rawData].reverse()) {
-            if (row.audit === currentThumb && row.text.startsWith("VAULT[")) {
+            if (row.text && row.text.startsWith("VAULT[")) {
                 const dec = await decrypt(row.text.substring(6, row.text.length-1), pass);
                 if (dec) {
                     try {
@@ -154,7 +150,7 @@
                         count++;
                         const tr = document.createElement('tr');
                         const dateStr = fmt.format(new Date(row.timestamp));
-                        const mapLink = (!isNaN(obj.lat) && obj.lat !== null) 
+                        const mapLink = (!isNaN(obj.lat) && obj.lat !== null && obj.lat !== "N/A") 
                             ? `<a class="map-link" href="https://www.google.com/maps?q=${obj.lat},${obj.lon}" target="_blank">View on Map</a>` 
                             : (obj.lat || "N/A");
 
@@ -180,8 +176,6 @@
             setTimeout(() => status.innerText = old, 2000);
         });
     };
-
-    window.onload = () => { if(document.getElementById('passphrase').value) renderTable(); };
 </script>
 </body>
 </html>
