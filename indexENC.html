@@ -12,9 +12,10 @@
         #status { margin: 0.5rem 0; font-weight: 500; color: #1e293b; min-height: 1.2rem; }
         #transcribedText { font-size: 0.9rem; color: #475569; margin: 10px 0; font-style: italic; min-height: 1.2rem; border-bottom: 1px solid #eee; padding-bottom: 5px; }
         
-        /* New Passphrase Style */
-        .pass-container { margin-bottom: 1rem; }
-        input[type="password"] { width: 100%; padding: 0.8rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; box-sizing: border-box; font-size: 1rem; text-align: center; }
+        /* Passphrase Style */
+        .pass-container { margin-bottom: 1rem; position: relative; }
+        input[type="password"], input[type="text"].pass-input { width: 100%; padding: 0.8rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; box-sizing: border-box; font-size: 1rem; text-align: center; }
+        .show-pass { font-size: 0.75rem; color: #64748b; margin-top: 0.4rem; display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; }
         
         button { border: none; border-radius: 1rem; padding: 1rem 2rem; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s; width: 100%; margin-bottom: 0.8rem; }
         button:active { transform: scale(0.98); }
@@ -32,7 +33,10 @@
     
     <form id="vaultForm">
         <div class="pass-container">
-            <input type="password" id="passphrase" name="password" autocomplete="current-password" placeholder="Vault Passphrase" required minlength="10">
+            <input type="password" id="passphrase" class="pass-input" name="password" autocomplete="current-password" placeholder="Vault Passphrase" required minlength="10">
+            <label class="show-pass">
+                <input type="checkbox" onchange="document.getElementById('passphrase').type = this.checked ? 'text' : 'password'"> Show Passphrase
+            </label>
         </div>
         
         <div id="status">Ready</div>
@@ -60,14 +64,9 @@
     const logId = urlParams.get('id');
     const deployUrl = urlParams.get('deploy') || localStorage.getItem('saved_deploy_url');
 
-    // Logic Gate: Must have valid ID and Deployment URL
     if (!isValid(logId) || !deployUrl) {
-        document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;">' +
-                                  '<h1>Access Denied</h1>' +
-                                  '<p>Invalid ID or Missing Deployment Parameter.</p>' +
-                                  '</div>';
+        document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;"><h1>Access Denied</h1><p>Invalid ID or Missing Deployment Parameter.</p></div>';
     } else {
-        // Save valid config
         localStorage.setItem('loggerUserID', logId);
         localStorage.setItem('saved_deploy_url', deployUrl);
 
@@ -137,7 +136,14 @@
             gpsBtn.classList.remove('recording');
         };
 
-        // --- 4. ENCRYPTION & TRANSMISSION ---
+        // --- 4. HASHING, ENCRYPTION & TRANSMISSION ---
+        async function getThumbprint(pass) {
+            const msgUint8 = new TextEncoder().encode(pass + "salt2026");
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
+        }
+
         async function prepareVault(text, lat, lon) {
             const pass = document.getElementById('passphrase').value;
             const currentDeploy = localStorage.getItem('saved_deploy_url');
@@ -165,14 +171,12 @@
                 combined.set(new Uint8Array(encrypted), iv.length);
                 
                 const vaultString = "VAULT[" + btoa(String.fromCharCode(...combined)) + "]";
+                const thumb = await getThumbprint(pass);
 
-                // Post to Google Sheet
-                status.innerText = "Sending to Vault...";
-                fetch(currentDeploy, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    body: JSON.stringify({ id: "SECURE", user: "SECURE", text: vaultString, lat: "SECURE", lon: "SECURE" })
-                }).then(() => {
+                // Post to Google Sheet via URL parameters (consistent with doGet logic)
+                status.innerText = "Saving...";
+                fetch(`${currentDeploy}?text=${encodeURIComponent(vaultString)}&audit=${thumb}`)
+                .then(() => {
                     status.innerText = "Saved Successfully!";
                     setTimeout(() => { status.innerText = "Ready"; display.innerText = ""; }, 3000);
                 });
