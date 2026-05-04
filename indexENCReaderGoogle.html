@@ -11,12 +11,9 @@
         #userDisplay { font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem; }
         #status { margin: 0.5rem 0; font-weight: 500; color: #1e293b; min-height: 1.2rem; }
         #transcribedText { font-size: 0.9rem; color: #475569; margin: 10px 0; font-style: italic; min-height: 1.2rem; border-bottom: 1px solid #eee; padding-bottom: 5px; }
-        
-        /* Passphrase Style */
         .pass-container { margin-bottom: 1rem; position: relative; }
         input[type="password"], input[type="text"].pass-input { width: 100%; padding: 0.8rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; box-sizing: border-box; font-size: 1rem; text-align: center; }
         .show-pass { font-size: 0.75rem; color: #64748b; margin-top: 0.4rem; display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; }
-        
         button { border: none; border-radius: 1rem; padding: 1rem 2rem; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s; width: 100%; margin-bottom: 0.8rem; }
         button:active { transform: scale(0.98); }
         .btn-voice { background: var(--primary); color: white; }
@@ -50,141 +47,138 @@
 </div>
 
 <script>
-    // --- 1. GATEKEEPER & DEPLOYMENT CONFIG ---
-    function isValid(id) {
-        if (!id || id.length < 3 || id.length > 6) return false;
-        const base = id.slice(0, -1).toUpperCase();
-        const providedDigit = parseInt(id.slice(-1));
-        let sum = 0;
-        for (let i = 0; i < base.length; i++) { sum += (base.charCodeAt(i) - 64); }
-        return (providedDigit === (sum % 10));
-    }
-
+    // --- 1. CONFIGURATION HANDLING ---
     const urlParams = new URLSearchParams(window.location.search);
     const logId = urlParams.get('id');
-    const deployUrl = urlParams.get('deploy') || localStorage.getItem('saved_deploy_url');
+    const deployUrl = urlParams.get('deploy'); // Passed directly from Code.gs redirect
 
-    if (!isValid(logId) || !deployUrl) {
-        document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;"><h1>Access Denied</h1><p>Invalid ID or Missing Deployment Parameter.</p></div>';
-    } else {
-        localStorage.setItem('loggerUserID', logId);
-        localStorage.setItem('saved_deploy_url', deployUrl);
+    // If ID or Deploy are missing, we cannot function
+    if (!logId || !deployUrl) {
+        document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;"><h1>Configuration Error</h1><p>The logger must be opened via a valid deployment link.</p></div>';
+        throw new Error("Missing parameters"); // Stop script execution
+    }
 
-        // --- 2. INITIALIZATION ---
-        let userName = localStorage.getItem('loggerUserName');
-        const status = document.getElementById('status');
-        const display = document.getElementById('transcribedText');
-        const voiceBtn = document.getElementById('voiceBtn');
-        const gpsBtn = document.getElementById('gpsBtn');
+    // Save to localStorage for persistence
+    localStorage.setItem('loggerUserID', logId);
+    localStorage.setItem('saved_deploy_url', deployUrl);
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = new SpeechRecognition();
-        recognition.lang = 'en-GB';
-        recognition.interimResults = false;
+    // --- 2. INITIALIZATION ---
+    let userName = localStorage.getItem('loggerUserName');
+    const status = document.getElementById('status');
+    const display = document.getElementById('transcribedText');
+    const voiceBtn = document.getElementById('voiceBtn');
+    const gpsBtn = document.getElementById('gpsBtn');
 
-        let useGPS = false;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-GB';
+    recognition.interimResults = false;
 
-        function checkUser() {
-            if (!userName) {
-                userName = prompt("Enter your Name:");
-                if (!userName || userName.trim() === "") userName = "User_" + logId;
-                localStorage.setItem('loggerUserName', userName);
-            }
-            document.getElementById('userNameText').innerText = userName;
+    let useGPS = false;
+
+    function checkUser() {
+        if (!userName) {
+            userName = prompt("Enter your Name:");
+            if (!userName || userName.trim() === "") userName = "User_" + logId;
+            localStorage.setItem('loggerUserName', userName);
         }
+        document.getElementById('userNameText').innerText = userName;
+    }
 
-        function changeUser() {
-            localStorage.removeItem('loggerUserName');
-            userName = null;
-            checkUser();
-        }
-
+    function changeUser() {
+        localStorage.removeItem('loggerUserName');
+        userName = null;
         checkUser();
+    }
 
-        // --- 3. VOICE & GPS HANDLING ---
-        voiceBtn.onclick = () => { useGPS = false; startRecording(); };
-        gpsBtn.onclick = () => { useGPS = true; startRecording(); };
+    checkUser();
 
-        function startRecording() {
-            const pass = document.getElementById('passphrase').value;
-            if (pass.length < 10) return alert("Passphrase must be at least 10 characters.");
-            
-            display.innerText = "";
-            recognition.start();
-            status.innerText = "Listening...";
-            voiceBtn.classList.add('recording');
-            gpsBtn.classList.add('recording');
+    // --- 3. VOICE & GPS HANDLING ---
+    voiceBtn.onclick = () => { useGPS = false; startRecording(); };
+    gpsBtn.onclick = () => { useGPS = true; startRecording(); };
+
+    function startRecording() {
+        const pass = document.getElementById('passphrase').value;
+        if (pass.length < 10) return alert("Passphrase must be at least 10 characters.");
+        
+        display.innerText = "";
+        recognition.start();
+        status.innerText = "Listening...";
+        voiceBtn.classList.add('recording');
+        gpsBtn.classList.add('recording');
+    }
+
+    recognition.onresult = (event) => {
+        const text = event.results[0][0].transcript;
+        display.innerText = text;
+        status.innerText = "Encrypting...";
+        
+        if (useGPS) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => prepareVault(text, pos.coords.latitude, pos.coords.longitude),
+                (err) => prepareVault(text, "GPS Error", "GPS Error")
+            );
+        } else {
+            prepareVault(text, "N/A", "N/A");
         }
+    };
 
-        recognition.onresult = (event) => {
-            const text = event.results[0][0].transcript;
-            display.innerText = text;
-            status.innerText = "Encrypting...";
+    recognition.onend = () => {
+        voiceBtn.classList.remove('recording');
+        gpsBtn.classList.remove('recording');
+    };
+
+    // --- 4. HASHING, ENCRYPTION & TRANSMISSION ---
+    async function getThumbprint(pass) {
+        const msgUint8 = new TextEncoder().encode(pass + "salt2026");
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
+    }
+
+    async function prepareVault(text, lat, lon) {
+        const pass = document.getElementById('passphrase').value;
+        const currentDeploy = localStorage.getItem('saved_deploy_url');
+
+        try {
+            const enc = new TextEncoder();
+            const keyMat = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+            const key = await crypto.subtle.deriveKey(
+                { name: "PBKDF2", salt: enc.encode("static-salt-2026"), iterations: 100000, hash: "SHA-256" },
+                keyMat, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
+            );
+
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const payload = JSON.stringify({
+                id: localStorage.getItem('loggerUserID'),
+                user: userName,
+                text: text,
+                lat: lat,
+                lon: lon
+            });
+
+            const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, enc.encode(payload));
+            const combined = new Uint8Array(iv.length + encrypted.byteLength);
+            combined.set(iv); 
+            combined.set(new Uint8Array(encrypted), iv.length);
             
-            if (useGPS) {
-                navigator.geolocation.getCurrentPosition(
-                    (pos) => prepareVault(text, pos.coords.latitude, pos.coords.longitude),
-                    (err) => prepareVault(text, "GPS Error", "GPS Error")
-                );
-            } else {
-                prepareVault(text, "N/A", "N/A");
-            }
-        };
+            const vaultString = "VAULT[" + btoa(String.fromCharCode(...combined)) + "]";
+            const thumb = await getThumbprint(pass);
 
-        recognition.onend = () => {
-            voiceBtn.classList.remove('recording');
-            gpsBtn.classList.remove('recording');
-        };
+            status.innerText = "Saving...";
+            
+            // Append ID to the fetch so it shows in the spreadsheet column B
+            const fetchUrl = `${currentDeploy}?text=${encodeURIComponent(vaultString)}&audit=${thumb}&id=${logId}`;
+            
+            fetch(fetchUrl)
+            .then(() => {
+                status.innerText = "Saved Successfully!";
+                setTimeout(() => { status.innerText = "Ready"; display.innerText = ""; }, 3000);
+            });
 
-        // --- 4. HASHING, ENCRYPTION & TRANSMISSION ---
-        async function getThumbprint(pass) {
-            const msgUint8 = new TextEncoder().encode(pass + "salt2026");
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
-        }
-
-        async function prepareVault(text, lat, lon) {
-            const pass = document.getElementById('passphrase').value;
-            const currentDeploy = localStorage.getItem('saved_deploy_url');
-
-            try {
-                const enc = new TextEncoder();
-                const keyMat = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
-                const key = await crypto.subtle.deriveKey(
-                    { name: "PBKDF2", salt: enc.encode("static-salt-2026"), iterations: 100000, hash: "SHA-256" },
-                    keyMat, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
-                );
-
-                const iv = crypto.getRandomValues(new Uint8Array(12));
-                const payload = JSON.stringify({
-                    id: localStorage.getItem('loggerUserID'),
-                    user: userName,
-                    text: text,
-                    lat: lat,
-                    lon: lon
-                });
-
-                const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, enc.encode(payload));
-                const combined = new Uint8Array(iv.length + encrypted.byteLength);
-                combined.set(iv); 
-                combined.set(new Uint8Array(encrypted), iv.length);
-                
-                const vaultString = "VAULT[" + btoa(String.fromCharCode(...combined)) + "]";
-                const thumb = await getThumbprint(pass);
-
-                // Post to Google Sheet via URL parameters (consistent with doGet logic)
-                status.innerText = "Saving...";
-                fetch(`${currentDeploy}?text=${encodeURIComponent(vaultString)}&audit=${thumb}`)
-                .then(() => {
-                    status.innerText = "Saved Successfully!";
-                    setTimeout(() => { status.innerText = "Ready"; display.innerText = ""; }, 3000);
-                });
-
-            } catch (e) {
-                status.innerText = "Encryption Failed";
-                console.error(e);
-            }
+        } catch (e) {
+            status.innerText = "Encryption Failed";
+            console.error(e);
         }
     }
 </script>
