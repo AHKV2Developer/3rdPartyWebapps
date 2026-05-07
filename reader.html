@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reader</title>
+    <title>Secure Vault Reader</title>
     <link rel="manifest" href="manifest-reader.json">
     <link rel="apple-touch-icon" href="Reader_Icon.png">
+    <script>
+      if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+    </script>
     <style>
         body { font-family: "Courier New", Courier, monospace; font-size: 13px; padding: 10px; }
         table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-top: 20px; }
@@ -14,46 +17,73 @@
         td:hover { overflow: visible; white-space: normal; background: #ffffd0; position: relative; z-index: 10; }
         .controls { border: 1px solid #000; padding: 10px; display: inline-block; background: #fafafa; }
         .input-row { display: flex; align-items: flex-start; gap: 10px; }
-        input[type="password"] { height: 22px; width: 180px; border: 1px solid #000; font-family: inherit; }
-        .ctrl-btn { font-family: inherit; font-size: 12px; background: #fff; border: 1px solid #000; cursor: pointer; padding: 0 8px; height: 22px; }
+        .label-group { display: flex; align-items: center; gap: 8px; height: 22px; }
+        input[type="password"], input[type="text"].key-input { height: 22px; box-sizing: border-box; width: 180px; padding: 2px 4px; border: 1px solid #000; font-family: inherit; }
+        .ctrl-btn { font-family: "Courier New", Courier, monospace; font-size: 12px; background: #fff; border: 1px solid #000; cursor: pointer; padding: 0 8px; width: 130px; height: 22px; display: flex; align-items: center; justify-content: center; color: #000; }
+        .ctrl-btn:hover { background: #eee; }
     </style>
 </head>
 <body>
 
 <div class="controls">
-    <form onsubmit="event.preventDefault(); fetchData();">
+    <form id="vaultForm" onsubmit="event.preventDefault(); fetchData();">
         <div class="input-row">
-            <strong>Key:</strong> 
-            <input type="password" id="passphrase" oninput="liveFetch()">
-            <label><input type="checkbox" onchange="document.getElementById('passphrase').type = this.checked ? 'text' : 'password'"> Show</label>
-            <button type="submit" class="ctrl-btn">🔄 Refresh</button>
-            <button type="button" class="ctrl-btn" id="copyBtn">Copy TSV</button>
+            <div class="label-group">
+                <strong>Key:</strong> 
+                <input type="password" id="passphrase" name="password" autocomplete="current-password" class="key-input" oninput="liveFetch()">
+                <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap;">
+                    <input type="checkbox" onchange="document.getElementById('passphrase').type = this.checked ? 'text' : 'password'"> Show
+                </label>
+            </div>
+            <div class="button-stack" style="display: flex; flex-direction: column; gap: 2px;">
+                <button type="submit" class="ctrl-btn"><span>🔄 Refresh</span></button>
+                <button type="button" class="ctrl-btn" id="copyBtn"><span>Copy Records</span></button>
+            </div>
         </div>
     </form>
     <div id="status" style="margin-top:8px; font-weight: bold;">Ready.</div>
 </div>
 
 <table id="mainTable">
-    <thead><tr><th style="width:160px">Timestamp</th><th style="width:60px">ID</th><th style="width:100px">User</th><th>Message</th><th style="width:100px">GPS</th></tr></thead>
+    <thead>
+        <tr>
+            <th style="width:160px">Timestamp</th>
+            <th style="width:80px">ID</th>
+            <th style="width:120px">User</th>
+            <th>Message (Hover to Expand)</th>
+            <th style="width:120px">GPS</th>
+        </tr>
+    </thead>
     <tbody id="tableBody"></tbody>
 </table>
 
 <script>
-    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
-
+    let rawData = [];
+    
+    // URL HANDLING
     const urlParams = new URLSearchParams(window.location.search);
     const logId = urlParams.get('id') || localStorage.getItem('loggerUserID');
     const deployUrl = urlParams.get('deploy') || localStorage.getItem('saved_deploy_url');
+
     if (logId) localStorage.setItem('loggerUserID', logId);
     if (deployUrl) localStorage.setItem('saved_deploy_url', deployUrl);
 
-    async function liveFetch() { if (document.getElementById('passphrase').value.length >= 10) fetchData(); }
+    async function liveFetch() {
+        const pass = document.getElementById('passphrase').value;
+        if (pass.length >= 10) {
+            fetchData();
+        } else {
+            document.getElementById('status').innerText = "Key too short...";
+            document.getElementById('tableBody').innerHTML = "";
+        }
+    }
 
     async function getThumbprint(pass) {
         const uID = localStorage.getItem('loggerUserID') || "";
         const msgUint8 = new TextEncoder().encode(pass + "salt2026" + uID);
         const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-        return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
     }
 
     async function decrypt(blob, pass) {
@@ -80,12 +110,12 @@
         const thumb = await getThumbprint(pass);
         try {
             const r = await fetch(`${deployUrl}?read=true&audit=${thumb}`);
-            const data = await r.json();
-            renderTable(data, pass);
+            rawData = await r.json();
+            renderTable(pass);
         } catch(e) { document.getElementById('status').innerText = "Sync failed."; }
     }
 
-    async function renderTable(rawData, pass) {
+    async function renderTable(pass) {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = "";
         let count = 0;
@@ -93,17 +123,34 @@
             if (row.text && row.text.startsWith("VAULT[")) {
                 const dec = await decrypt(row.text.substring(6, row.text.length-1), pass);
                 if (dec) {
-                    const obj = JSON.parse(dec);
-                    count++;
-                    const tr = document.createElement('tr');
-                    const gps = (obj.lat && obj.lat !== "N/A") ? `<a href="https://maps.google.com/?q=${obj.lat},${obj.lon}" target="_blank">Map</a>` : "N/A";
-                    tr.innerHTML = `<td>${row.timestamp}</td><td>${obj.id}</td><td>${obj.user}</td><td>${obj.text}</td><td>${gps}</td>`;
-                    tbody.appendChild(tr);
+                    try {
+                        const obj = JSON.parse(dec);
+                        count++;
+                        const tr = document.createElement('tr');
+                        const mapLink = (obj.lat && obj.lat !== "N/A") ? `<a href="https://www.google.com/maps?q=${obj.lat},${obj.lon}" target="_blank">View on Map</a>` : "N/A";
+                        
+                        tr.innerHTML = `<td>${row.timestamp}</td><td>${obj.id || 'N/A'}</td><td>${obj.user || 'N/A'}</td><td>${obj.text}</td><td>${mapLink}</td>`;
+                        tbody.appendChild(tr);
+                    } catch(e) {}
                 }
             }
         }
-        document.getElementById('status').innerText = count + " records.";
+        document.getElementById('status').innerText = count + " records found.";
     }
+
+    document.getElementById('copyBtn').onclick = function() {
+        const table = document.getElementById('mainTable');
+        let tsv = [Array.from(table.querySelectorAll('th')).map(th => th.innerText).join('\t')];
+        Array.from(table.querySelectorAll('tbody tr')).forEach(row => {
+            tsv.push(Array.from(row.querySelectorAll('td')).map(td => td.innerText).join('\t'));
+        });
+        navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+            const status = document.getElementById('status');
+            const old = status.innerText;
+            status.innerText = "COPIED";
+            setTimeout(() => status.innerText = old, 2000);
+        });
+    };
 </script>
 </body>
 </html>
