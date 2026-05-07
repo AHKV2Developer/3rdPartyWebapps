@@ -12,28 +12,15 @@
       }
     </script>
     <style>
-        body { font-family: "Courier New", Courier, monospace; font-size: 13px; padding: 10px; }
-        table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-top: 20px; }
-        th, td { border: 1px solid #000; padding: 4px 8px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        body { font-family: "Courier New", Courier, monospace; font-size: 13px; padding: 10px; overflow-x: auto; }
+        table { border-collapse: collapse; min-width: 800px; table-layout: auto; margin-top: 20px; }
+        th, td { border: 1px solid #000; padding: 4px 8px; text-align: left; white-space: nowrap; }
         th { background: #eee; font-weight: bold; }
         
-        /* Desktop: Hover to expand */
+        /* Desktop Hover Effect Only */
         @media (hover: hover) {
             td:hover { 
-                overflow: visible; 
-                white-space: normal; 
                 background: #ffffd0; 
-                position: relative; 
-                z-index: 10; 
-                word-break: break-word;
-            }
-        }
-
-        /* Mobile: Show message by default since hover doesn't exist */
-        @media (hover: none) {
-            td { 
-                white-space: normal; 
-                word-break: break-word; 
             }
         }
         
@@ -66,18 +53,20 @@
     <div id="status" style="margin-top:8px; font-weight: bold;">Ready.</div>
 </div>
 
-<table id="mainTable">
-    <thead>
-        <tr>
-            <th style="width:160px">Timestamp</th>
-            <th style="width:80px">ID</th>
-            <th style="width:120px">User</th>
-            <th>Message (Hover to Expand)</th>
-            <th style="width:120px">GPS</th>
-        </tr>
-    </thead>
-    <tbody id="tableBody"></tbody>
-</table>
+<div style="overflow-x: auto;">
+    <table id="mainTable">
+        <thead>
+            <tr>
+                <th style="width:160px">Timestamp</th>
+                <th style="width:80px">ID</th>
+                <th style="width:120px">User</th>
+                <th>Message</th>
+                <th style="width:120px">GPS</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+    </table>
+</div>
 
 <script>
     let rawData = [];
