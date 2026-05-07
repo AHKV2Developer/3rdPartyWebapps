@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Secure Voice Logger v3</title>
+    <title>Logger</title>
+    <link rel="manifest" href="manifest-logger.json">
+    <link rel="apple-touch-icon" href="Logger_Pub_Icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    
     <style>
         :root { --primary: #2563eb; --secondary: #3b82f6; --bg: #f8fafc; }
         body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
@@ -11,12 +16,9 @@
         #userDisplay { font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem; }
         #status { margin: 0.5rem 0; font-weight: 500; color: #1e293b; min-height: 1.2rem; }
         #transcribedText { font-size: 0.9rem; color: #475569; margin: 10px 0; font-style: italic; min-height: 1.2rem; border-bottom: 1px solid #eee; padding-bottom: 5px; }
-        
-        /* Passphrase Style */
         .pass-container { margin-bottom: 1rem; position: relative; }
         input[type="password"], input[type="text"].pass-input { width: 100%; padding: 0.8rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; box-sizing: border-box; font-size: 1rem; text-align: center; }
         .show-pass { font-size: 0.75rem; color: #64748b; margin-top: 0.4rem; display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; }
-        
         button { border: none; border-radius: 1rem; padding: 1rem 2rem; font-size: 1.1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s; width: 100%; margin-bottom: 0.8rem; }
         button:active { transform: scale(0.98); }
         .btn-voice { background: var(--primary); color: white; }
@@ -30,7 +32,6 @@
 
 <div class="container">
     <div id="userDisplay">Logged as: <span id="userNameText">...</span></div>
-    
     <form id="vaultForm">
         <div class="pass-container">
             <input type="password" id="passphrase" class="pass-input" name="password" autocomplete="current-password" placeholder="Vault Passphrase" required minlength="10">
@@ -38,19 +39,19 @@
                 <input type="checkbox" onchange="document.getElementById('passphrase').type = this.checked ? 'text' : 'password'"> Show Passphrase
             </label>
         </div>
-        
         <div id="status">Ready</div>
         <div id="transcribedText"></div>
-        
         <button type="button" id="voiceBtn" class="btn-voice">Voice Only</button>
         <button type="button" id="gpsBtn" class="btn-gps">Voice + GPS</button>
     </form>
-    
     <button onclick="changeUser()" class="btn-settings">Change Name</button>
 </div>
 
 <script>
-    // --- 1. GATEKEEPER & DEPLOYMENT CONFIG ---
+    // Register Service Worker
+    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+
+    // --- 1. GATEKEEPER & ID PERSISTENCE ---
     function isValid(id) {
         if (!id || id.length < 3 || id.length > 6) return false;
         const base = id.slice(0, -1).toUpperCase();
@@ -61,16 +62,15 @@
     }
 
     const urlParams = new URLSearchParams(window.location.search);
-    const logId = urlParams.get('id');
+    let logId = urlParams.get('id') || localStorage.getItem('loggerUserID');
     const deployUrl = urlParams.get('deploy') || localStorage.getItem('saved_deploy_url');
 
     if (!isValid(logId) || !deployUrl) {
-        document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;"><h1>Access Denied</h1><p>Invalid ID or Missing Deployment Parameter.</p></div>';
+        document.body.innerHTML = '<div style="text-align:center; padding:50px; font-family:sans-serif;"><h1>Access Denied</h1><p>Invalid ID or Missing Parameters.</p></div>';
     } else {
         localStorage.setItem('loggerUserID', logId);
         localStorage.setItem('saved_deploy_url', deployUrl);
 
-        // --- 2. INITIALIZATION ---
         let userName = localStorage.getItem('loggerUserName');
         const status = document.getElementById('status');
         const display = document.getElementById('transcribedText');
@@ -80,9 +80,6 @@
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
         recognition.lang = 'en-GB';
-        recognition.interimResults = false;
-
-        let useGPS = false;
 
         function checkUser() {
             if (!userName) {
@@ -92,53 +89,40 @@
             }
             document.getElementById('userNameText').innerText = userName;
         }
-
-        function changeUser() {
-            localStorage.removeItem('loggerUserName');
-            userName = null;
-            checkUser();
-        }
-
         checkUser();
 
-        // --- 3. VOICE & GPS HANDLING ---
+        function changeUser() { localStorage.removeItem('loggerUserName'); userName = null; checkUser(); }
+
         voiceBtn.onclick = () => { useGPS = false; startRecording(); };
         gpsBtn.onclick = () => { useGPS = true; startRecording(); };
 
         function startRecording() {
             const pass = document.getElementById('passphrase').value;
-            if (pass.length < 10) return alert("Passphrase must be at least 10 characters.");
-            
+            if (pass.length < 10) return alert("Passphrase too short.");
             display.innerText = "";
             recognition.start();
             status.innerText = "Listening...";
             voiceBtn.classList.add('recording');
-            gpsBtn.classList.add('recording');
         }
 
         recognition.onresult = (event) => {
             const text = event.results[0][0].transcript;
             display.innerText = text;
             status.innerText = "Encrypting...";
-            
             if (useGPS) {
                 navigator.geolocation.getCurrentPosition(
                     (pos) => prepareVault(text, pos.coords.latitude, pos.coords.longitude),
-                    (err) => prepareVault(text, "GPS Error", "GPS Error")
+                    () => prepareVault(text, "GPS Error", "GPS Error")
                 );
-            } else {
-                prepareVault(text, "N/A", "N/A");
-            }
+            } else { prepareVault(text, "N/A", "N/A"); }
         };
 
-        recognition.onend = () => {
-            voiceBtn.classList.remove('recording');
-            gpsBtn.classList.remove('recording');
-        };
+        recognition.onend = () => voiceBtn.classList.remove('recording');
 
-        // --- 4. HASHING, ENCRYPTION & TRANSMISSION ---
+        // --- 4. UPDATED ENCRYPTION (WITH ID SALT) ---
         async function getThumbprint(pass) {
-            const msgUint8 = new TextEncoder().encode(pass + "salt2026");
+            const uID = localStorage.getItem('loggerUserID');
+            const msgUint8 = new TextEncoder().encode(pass + "salt2026" + uID);
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
             const hashArray = Array.from(new Uint8Array(hashBuffer));
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
@@ -146,45 +130,35 @@
 
         async function prepareVault(text, lat, lon) {
             const pass = document.getElementById('passphrase').value;
+            const uID = localStorage.getItem('loggerUserID');
             const currentDeploy = localStorage.getItem('saved_deploy_url');
 
             try {
                 const enc = new TextEncoder();
                 const keyMat = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+                const salt = enc.encode("static-salt-2026" + uID);
+                
                 const key = await crypto.subtle.deriveKey(
-                    { name: "PBKDF2", salt: enc.encode("static-salt-2026"), iterations: 100000, hash: "SHA-256" },
+                    { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
                     keyMat, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
                 );
 
                 const iv = crypto.getRandomValues(new Uint8Array(12));
-                const payload = JSON.stringify({
-                    id: localStorage.getItem('loggerUserID'),
-                    user: userName,
-                    text: text,
-                    lat: lat,
-                    lon: lon
-                });
-
+                const payload = JSON.stringify({ id: uID, user: userName, text: text, lat: lat, lon: lon });
                 const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, enc.encode(payload));
-                const combined = new Uint8Array(iv.length + encrypted.byteLength);
-                combined.set(iv); 
-                combined.set(new Uint8Array(encrypted), iv.length);
                 
+                const combined = new Uint8Array(iv.length + encrypted.byteLength);
+                combined.set(iv); combined.set(new Uint8Array(encrypted), iv.length);
                 const vaultString = "VAULT[" + btoa(String.fromCharCode(...combined)) + "]";
                 const thumb = await getThumbprint(pass);
 
-                // Post to Google Sheet via URL parameters (consistent with doGet logic)
                 status.innerText = "Saving...";
                 fetch(`${currentDeploy}?text=${encodeURIComponent(vaultString)}&audit=${thumb}`)
                 .then(() => {
-                    status.innerText = "Saved Successfully!";
-                    setTimeout(() => { status.innerText = "Ready"; display.innerText = ""; }, 3000);
+                    status.innerText = "Saved!";
+                    setTimeout(() => { status.innerText = "Ready"; display.innerText = ""; }, 2000);
                 });
-
-            } catch (e) {
-                status.innerText = "Encryption Failed";
-                console.error(e);
-            }
+            } catch (e) { status.innerText = "Error"; }
         }
     }
 </script>
