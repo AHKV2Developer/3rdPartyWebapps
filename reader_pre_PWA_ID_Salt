@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Vault Reader</title>
+    <style>
+        body { font-family: "Courier New", Courier, monospace; font-size: 13px; padding: 10px; }
+        table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-top: 20px; }
+        th, td { border: 1px solid #000; padding: 4px 8px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        th { background: #eee; font-weight: bold; }
+        td:hover { overflow: visible; white-space: normal; background: #ffffd0; position: relative; z-index: 10; }
+        .controls { border: 1px solid #000; padding: 10px; display: inline-block; background: #fafafa; }
+        .input-row { display: flex; align-items: flex-start; gap: 10px; }
+        .label-group { display: flex; align-items: center; gap: 8px; height: 22px; }
+        input[type="password"], input[type="text"].key-input { height: 22px; box-sizing: border-box; width: 180px; padding: 2px 4px; border: 1px solid #000; font-family: inherit; }
+        .ctrl-btn { font-family: "Courier New", Courier, monospace; font-size: 12px; background: #fff; border: 1px solid #000; cursor: pointer; padding: 0 8px; width: 130px; height: 22px; display: flex; align-items: center; justify-content: center; color: #000; }
+        .ctrl-btn:hover { background: #eee; }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <form id="vaultForm" onsubmit="event.preventDefault(); fetchData();">
+        <div class="input-row">
+            <div class="label-group">
+                <strong>Key:</strong> 
+                <input type="password" id="passphrase" name="password" autocomplete="current-password" class="key-input" oninput="liveFetch()">
+                <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap;">
+                    <input type="checkbox" onchange="document.getElementById('passphrase').type = this.checked ? 'text' : 'password'"> Show
+                </label>
+            </div>
+            <div class="button-stack" style="display: flex; flex-direction: column; gap: 2px;">
+                <button type="submit" class="ctrl-btn"><span>🔄 Refresh</span></button>
+                <button type="button" class="ctrl-btn" id="copyBtn"><span>Copy Records</span></button>
+            </div>
+        </div>
+    </form>
+    <div id="status" style="margin-top:8px; font-weight: bold;">Ready.</div>
+</div>
+
+<table id="mainTable">
+    <thead>
+        <tr>
+            <th style="width:160px">Timestamp</th>
+            <th style="width:80px">ID</th>
+            <th style="width:120px">User</th>
+            <th>Message (Hover to Expand)</th>
+            <th style="width:120px">GPS</th>
+        </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+</table>
+
+<script>
+    let rawData = [];
+    
+    // URL HANDLING: Gets deploy URL from URL bar or LocalStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    const deployUrl = urlParams.get('deploy') || localStorage.getItem('saved_deploy_url');
+
+    if (deployUrl) localStorage.setItem('saved_deploy_url', deployUrl);
+
+    // LIVE MONITORING: Automatically fetches once key is 10+ characters
+    async function liveFetch() {
+        const pass = document.getElementById('passphrase').value;
+        if (pass.length >= 10) {
+            fetchData();
+        } else {
+            document.getElementById('status').innerText = "Key too short...";
+            document.getElementById('tableBody').innerHTML = "";
+        }
+    }
+
+    async function getThumbprint(pass) {
+        const msgUint8 = new TextEncoder().encode(pass + "salt2026");
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8);
+    }
+
+    async function decrypt(blob, pass) {
+        try {
+            const combined = Uint8Array.from(atob(blob), c => c.charCodeAt(0));
+            const iv = combined.slice(0, 12);
+            const ciphertext = combined.slice(12);
+            const enc = new TextEncoder();
+            const keyMat = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+            const key = await crypto.subtle.deriveKey(
+                { name: "PBKDF2", salt: enc.encode("static-salt-2026"), iterations: 100000, hash: "SHA-256" },
+                keyMat, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
+            );
+            const dec = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, ciphertext);
+            return new TextDecoder().decode(dec);
+        } catch(e) { return null; }
+    }
+
+    async function fetchData() {
+        const pass = document.getElementById('passphrase').value;
+        if (!deployUrl || pass.length < 10) return;
+        document.getElementById('status').innerText = "Syncing...";
+        const thumb = await getThumbprint(pass);
+        try {
+            const r = await fetch(`${deployUrl}?read=true&audit=${thumb}`);
+            rawData = await r.json();
+            renderTable(pass);
+        } catch(e) { document.getElementById('status').innerText = "Sync failed."; }
+    }
+
+    async function renderTable(pass) {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = "";
+        let count = 0;
+        for (let row of [...rawData].reverse()) {
+            if (row.text && row.text.startsWith("VAULT[")) {
+                const dec = await decrypt(row.text.substring(6, row.text.length-1), pass);
+                if (dec) {
+                    try {
+                        const obj = JSON.parse(dec);
+                        count++;
+                        const tr = document.createElement('tr');
+                        const mapLink = (obj.lat && obj.lat !== "N/A") ? `<a href="https://www.google.com/maps?q=${obj.lat},${obj.lon}" target="_blank">View on Map</a>` : "N/A";
+                        
+                        // FIX: Display the timestamp string exactly as Google sends it (no comma processing)
+                        tr.innerHTML = `<td>${row.timestamp}</td><td>${obj.id || 'N/A'}</td><td>${obj.user || 'N/A'}</td><td>${obj.text}</td><td>${mapLink}</td>`;
+                        
+                        tbody.appendChild(tr);
+                    } catch(e) {}
+                }
+            }
+        }
+        document.getElementById('status').innerText = count + " records found.";
+    }
+
+    document.getElementById('copyBtn').onclick = function() {
+        const table = document.getElementById('mainTable');
+        let tsv = [Array.from(table.querySelectorAll('th')).map(th => th.innerText).join('\t')];
+        Array.from(table.querySelectorAll('tbody tr')).forEach(row => {
+            tsv.push(Array.from(row.querySelectorAll('td')).map(td => td.innerText).join('\t'));
+        });
+        navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+            const status = document.getElementById('status');
+            const old = status.innerText;
+            status.innerText = "COPIED";
+            setTimeout(() => status.innerText = old, 2000);
+        });
+    };
+</script>
+</body>
+</html>
