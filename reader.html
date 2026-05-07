@@ -17,14 +17,24 @@
         th, td { border: 1px solid #000; padding: 4px 8px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         th { background: #eee; font-weight: bold; }
         
-        /* Fixed: Mobile-friendly expansion using :active and :hover */
-        td:hover, td:active { 
-            overflow: visible; 
-            white-space: normal; 
-            background: #ffffd0; 
-            position: relative; 
-            z-index: 10; 
-            word-break: break-word;
+        /* Desktop: Hover to expand */
+        @media (hover: hover) {
+            td:hover { 
+                overflow: visible; 
+                white-space: normal; 
+                background: #ffffd0; 
+                position: relative; 
+                z-index: 10; 
+                word-break: break-word;
+            }
+        }
+
+        /* Mobile: Show message by default since hover doesn't exist */
+        @media (hover: none) {
+            td { 
+                white-space: normal; 
+                word-break: break-word; 
+            }
         }
         
         .controls { border: 1px solid #000; padding: 10px; display: inline-block; background: #fafafa; }
@@ -62,7 +72,7 @@
             <th style="width:160px">Timestamp</th>
             <th style="width:80px">ID</th>
             <th style="width:120px">User</th>
-            <th>Message (Hover/Tap to Expand)</th>
+            <th>Message (Hover to Expand)</th>
             <th style="width:120px">GPS</th>
         </tr>
     </thead>
@@ -71,8 +81,6 @@
 
 <script>
     let rawData = [];
-    
-    // URL HANDLING: Get ID and Deploy URL from URL or LocalStorage
     const urlParams = new URLSearchParams(window.location.search);
     const logId = urlParams.get('id') || localStorage.getItem('loggerUserID');
     const deployUrl = urlParams.get('deploy') || localStorage.getItem('saved_deploy_url');
@@ -106,10 +114,7 @@
             const ciphertext = combined.slice(12);
             const enc = new TextEncoder();
             const keyMat = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
-            
-            // Critical Salt change: static salt + unique User ID
             const salt = enc.encode("static-salt-2026" + uID);
-            
             const key = await crypto.subtle.deriveKey(
                 { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
                 keyMat, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
@@ -145,8 +150,7 @@
                         const obj = JSON.parse(dec);
                         count++;
                         const tr = document.createElement('tr');
-                        // Fixed coordinate template literal syntax
-                        const mapLink = (obj.lat && obj.lat !== "N/A") ? `<a href="https://www.google.com/maps?q=${obj.lat},${obj.lon}" target="_blank">View Map</a>` : "N/A";
+                        const mapLink = (obj.lat && obj.lat !== "N/A") ? `<a href="http://googleusercontent.com/maps.google.com/${obj.lat},${obj.lon}" target="_blank">View on Map</a>` : "N/A";
                         
                         tr.innerHTML = `<td>${row.timestamp}</td><td>${obj.id || 'N/A'}</td><td>${obj.user || 'N/A'}</td><td>${obj.text}</td><td>${mapLink}</td>`;
                         tbody.appendChild(tr);
