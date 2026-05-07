@@ -14,14 +14,9 @@
     <style>
         body { font-family: "Courier New", Courier, monospace; font-size: 13px; padding: 10px; overflow-x: auto; }
         table { border-collapse: collapse; min-width: 800px; table-layout: auto; margin-top: 20px; }
-        th, td { border: 1px solid #000; padding: 4px 8px; text-align: left; white-space: nowrap; cursor: default; }
+        th, td { border: 1px solid #000; padding: 4px 8px; text-align: left; white-space: nowrap; }
         th { background: #eee; font-weight: bold; }
-        
-        /* Mobile/Desktop toggle expansion */
-        td.expanded { white-space: normal; word-break: break-word; background: #ffffd0; }
-        
-        @media (hover: hover) { td:hover { background: #f0f0f0; } }
-        
+        @media (hover: hover) { td:hover { background: #ffffd0; } }
         .controls { border: 1px solid #000; padding: 10px; display: inline-block; background: #fafafa; }
         .input-row { display: flex; align-items: flex-start; gap: 10px; }
         .label-group { display: flex; align-items: center; gap: 8px; height: 22px; }
@@ -58,7 +53,7 @@
                 <th style="width:160px">Timestamp</th>
                 <th style="width:80px">ID</th>
                 <th style="width:120px">User</th>
-                <th>Message (Dbl-Click to Expand)</th>
+                <th>Message</th>
                 <th style="width:120px">GPS</th>
             </tr>
         </thead>
@@ -131,10 +126,10 @@
                         count++;
                         const tr = document.createElement('tr');
                         
-                        // RESTORED TEXT AND FIXED HYPERLINK GENERATION
-                        const mapLink = (obj.lat && obj.lat !== "N/A") ? `<a href="https://www.google.com/maps/search/?api=1&query=${obj.lat},${obj.lon}" target="_blank">View on Map</a>` : "N/A";
+                        // UPDATED LINE INCLUDING THE 'API' STRING:
+                        const mapLink = (obj.lat && obj.lat !== "N/A") ? '<a href="http://googleusercontent.com/maps.google.com/maps/api/staticmap?center=' + obj.lat + ',' + obj.lon + '" target="_blank">View on Map</a>' : "N/A";
                         
-                        tr.innerHTML = `<td>${row.timestamp}</td><td>${obj.id || 'N/A'}</td><td>${obj.user || 'N/A'}</td><td ondblclick="this.classList.toggle('expanded')" onclick="if(window.innerWidth < 600) this.classList.toggle('expanded')">${obj.text}</td><td>${mapLink}</td>`;
+                        tr.innerHTML = `<td>${row.timestamp}</td><td>${obj.id || 'N/A'}</td><td>${obj.user || 'N/A'}</td><td>${obj.text}</td><td>${mapLink}</td>`;
                         tbody.appendChild(tr);
                     } catch(e) {}
                 }
