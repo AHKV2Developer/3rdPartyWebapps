@@ -127,7 +127,7 @@
                         const tr = document.createElement('tr');
                         
                         // UPDATED LINE INCLUDING THE 'API' STRING:
-                        const mapLink = (obj.lat && obj.lat !== "N/A") ? '<a href="http://googleusercontent.com/mapssearch/?api=1&query=' + obj.lat + ',' + obj.lon + '" target="_blank">View on Map</a>' : "N/A";
+                        const mapLink = (obj.lat && obj.lat !== "N/A") ? '<a href="http://googleusercontent.com/maps/search/?api=1&query=' + obj.lat + ',' + obj.lon + '" target="_blank">View on Map</a>' : "N/A";
                         
                         tr.innerHTML = `<td>${row.timestamp}</td><td>${obj.id || 'N/A'}</td><td>${obj.user || 'N/A'}</td><td>${obj.text}</td><td>${mapLink}</td>`;
                         tbody.appendChild(tr);
